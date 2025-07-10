@@ -2,6 +2,7 @@ from django.shortcuts import render
 
 # Create your views here.
 
+from rest_framework import serializers
 from django.shortcuts import render
 from rest_framework import generics, permissions
 from .models import Product, Cart
@@ -21,11 +22,6 @@ class ProductListCreateView(generics.ListCreateAPIView):
             return [permissions.IsAdminUser()]
         return [permissions.AllowAny()]
 
-    def get_permissions(self):
-        if self.request.method == 'POST':
-            return [permissions.IsAdminUser()]  # Только админ может создавать
-        return [permissions.AllowAny()]  # Все могут просматривать
-
 class CartListCreateView(generics.ListCreateAPIView):
     serializer_class = CartSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -34,7 +30,25 @@ class CartListCreateView(generics.ListCreateAPIView):
         return Cart.objects.filter(user=self.request.user)
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        user = self.request.user
+        product = serializer.validated_data['product']
+        quantity = serializer.validated_data['quantity']
+
+        try:
+            cart_item = Cart.objects.get(user=user, product=product)
+            new_quantity = cart_item.quantity + quantity
+
+            if new_quantity > product.quantity:
+                raise serializers.ValidationError("Недостаточно товара на складе.")
+
+            cart_item.quantity = new_quantity
+            cart_item.save()
+
+        except Cart.DoesNotExist:
+            if quantity > product.quantity:
+                raise serializers.ValidationError("Недостаточно товара на складе.")
+
+            serializer.save(user=user)
 
 class ProductDeleteView(generics.DestroyAPIView):
     queryset = Product.objects.all()
